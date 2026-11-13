@@ -62,7 +62,8 @@ export function CalendarPage() {
   }, [user]);
 
   useEffect(() => {
-    void loadSchedules();
+    const task = window.setTimeout(() => { void loadSchedules(); }, 0);
+    return () => window.clearTimeout(task);
   }, [loadSchedules]);
 
   useSupabaseRealtime('calendar_schedules', { table: 'calendar_schedules' }, () => {

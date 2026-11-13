@@ -16,7 +16,10 @@ export function useStudentExams() {
     setLoading(false);
   }, [student]);
 
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    const task = window.setTimeout(() => { void load(); }, 0);
+    return () => window.clearTimeout(task);
+  }, [load]);
 
   const upcoming  = exams.filter((e) => !e.submission && e.status === 'scheduled');
   const available = exams.filter((e) => !e.submission && (e.status === 'active' || e.is_instant));

@@ -18,7 +18,10 @@ export function useBatches() {
     setLoading(false);
   }, [user]);
 
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    const task = window.setTimeout(() => { void load(); }, 0);
+    return () => window.clearTimeout(task);
+  }, [load]);
 
   const create = async (values: BatchFormValues) => {
     if (!user) return;

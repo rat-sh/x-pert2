@@ -5,10 +5,13 @@ export function useLocalStorage<T>(key: string, initialValue: T) {
   const [storedValue, setStoredValue] = useState<T>(initialValue);
 
   useEffect(() => {
-    try {
-      const item = localStorage.getItem(key);
-      if (item) setStoredValue(JSON.parse(item) as T);
-    } catch {}
+    const task = window.setTimeout(() => {
+      try {
+        const item = localStorage.getItem(key);
+        if (item) setStoredValue(JSON.parse(item) as T);
+      } catch {}
+    }, 0);
+    return () => window.clearTimeout(task);
   }, [key]);
 
   const setValue = (value: T | ((val: T) => T)) => {

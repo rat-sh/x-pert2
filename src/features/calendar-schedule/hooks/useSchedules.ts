@@ -18,7 +18,10 @@ export function useSchedules() {
     setLoading(false);
   }, [user]);
 
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    const task = window.setTimeout(() => { void load(); }, 0);
+    return () => window.clearTimeout(task);
+  }, [load]);
 
   useSupabaseRealtime('calendar_schedules', { table: 'calendar_schedules' }, () => void load());
 

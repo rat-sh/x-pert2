@@ -16,7 +16,10 @@ export function useQuestionBank() {
     setLoading(false);
   }, [user]);
 
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    const task = window.setTimeout(() => { void load(); }, 0);
+    return () => window.clearTimeout(task);
+  }, [load]);
 
   const viewingExam = bank.find((e) => e.id === viewingExamId) ?? null;
 

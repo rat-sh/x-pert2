@@ -26,7 +26,8 @@ export function useBatchStatus(): UseBatchStatusReturn {
   }, [student]);
 
   useEffect(() => {
-    void reload();
+    const task = window.setTimeout(() => { void reload(); }, 0);
+    return () => window.clearTimeout(task);
   }, [reload]);
 
   const leaveBatch = async (batchId: string, batchName: string): Promise<boolean> => {

@@ -26,7 +26,10 @@ export function useTeacherResults(initialExamId?: string) {
     setLoading(false);
   }, [user, examFilter]);
 
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    const task = window.setTimeout(() => { void load(); }, 0);
+    return () => window.clearTimeout(task);
+  }, [load]);
 
   // 15-second polling
   useEffect(() => {

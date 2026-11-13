@@ -6,17 +6,23 @@ export function useExamTimer(durationSeconds: number, onExpire: () => void) {
   const expiredRef = useRef(false);
 
   useEffect(() => {
-    const id = setInterval(() => {
-      setTimeLeft((prev) => {
-        if (prev <= 1) {
-          clearInterval(id);
-          if (!expiredRef.current) { expiredRef.current = true; onExpire(); }
-          return 0;
-        }
-        return prev - 1;
-      });
-    }, 1000);
-    return () => clearInterval(id);
+    let intervalId: ReturnType<typeof setInterval> | undefined;
+    const initialize = window.setTimeout(() => {
+      intervalId = setInterval(() => {
+        setTimeLeft((prev) => {
+          if (prev <= 1) {
+            if (intervalId) clearInterval(intervalId);
+            if (!expiredRef.current) { expiredRef.current = true; onExpire(); }
+            return 0;
+          }
+          return prev - 1;
+        });
+      }, 1000);
+    }, 0);
+    return () => {
+      window.clearTimeout(initialize);
+      if (intervalId) clearInterval(intervalId);
+    };
   }, [onExpire]);
 
   const fmt = (s: number) => {
@@ -33,11 +39,14 @@ export function usePerQuestionTimer(seconds: number, onExpire: () => void, quest
   const [timeLeft, setTimeLeft] = useState(seconds);
 
   useEffect(() => {
-    setTimeLeft(seconds);
+    const initialize = window.setTimeout(() => setTimeLeft(seconds), 0);
     const id = setInterval(() => {
       setTimeLeft((prev) => { if (prev <= 1) { clearInterval(id); onExpire(); return 0; } return prev - 1; });
     }, 1000);
-    return () => clearInterval(id);
+    return () => {
+      window.clearTimeout(initialize);
+      clearInterval(id);
+    };
   }, [questionIdx, seconds, onExpire]);
 
   return { timeLeft, formattedTime: `${String(Math.floor(timeLeft/60)).padStart(2,'0')}:${String(timeLeft%60).padStart(2,'0')}` };
