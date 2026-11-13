@@ -13,7 +13,6 @@ import { ExamDetails, ExamRow, Step, ActiveModal } from '../types/exam-creator.t
 import { createInitialPaper, paperItemsFromExtracted } from '../utils/exam-creator.utils';
 import {
   fetchTeacherExams,
-  saveExamDetails,
   saveAllQuestions,
   publishExamKey,
   duplicateExamService,
@@ -88,11 +87,9 @@ export function ExamCreatorPage() {
     }
 
     try {
-      const existingExam = editingExamId ? exams.find((e) => e.id === editingExamId) : undefined;
-      const examId = await saveExamDetails(user.id, details, editingExamId, existingExam);
-      setSavedExamId(examId);
+      setSavedExamId(editingExamId);
       setStep('questions');
-      toast.success('Exam details saved! Now add questions.');
+      toast.success('Exam details ready. Add questions, then save the complete paper.');
     } catch (err) {
       toast.error('Failed to save exam details: ' + (err instanceof Error ? err.message : 'Unknown error'));
     }
@@ -114,31 +111,38 @@ export function ExamCreatorPage() {
     setQuestionsDirty(true);
   };
 
-  const handleSaveQuestions = async (): Promise<boolean> => {
-    if (!savedExamId) return false;
+  const persistExamPaper = async (): Promise<string | null> => {
+    if (!user) return null;
     setSavingQuestions(true);
     try {
-      await saveAllQuestions(savedExamId, paperItems);
+      const existingExam = editingExamId ? exams.find((exam) => exam.id === editingExamId) : undefined;
+      const examId = await saveAllQuestions(user.id, details, savedExamId, existingExam, paperItems);
+      setSavedExamId(examId);
       setPaperItems([...paperItems]);
       setQuestionsDirty(false);
-      toast.success('Questions saved!');
-      return true;
+      return examId;
     } catch (err) {
       toast.error('Failed to save questions: ' + (err instanceof Error ? err.message : 'Unknown error'));
-      return false;
+      return null;
     } finally {
       setSavingQuestions(false);
     }
   };
 
+  const handleSaveQuestions = async (): Promise<boolean> => {
+    const examId = await persistExamPaper();
+    if (!examId) return false;
+    toast.success('Questions saved!');
+    return true;
+  };
+
   const handleSaveAndGenerateKey = async () => {
-    if (!savedExamId) return;
-    const saved = await handleSaveQuestions();
-    if (!saved) return;
+    const examId = await persistExamPaper();
+    if (!examId) return;
 
     try {
-      const existingExam = exams.find((e) => e.id === savedExamId);
-      const result = await publishExamKey(savedExamId, existingExam, details, paperItems);
+      const existingExam = exams.find((e) => e.id === examId);
+      const result = await publishExamKey(examId, existingExam, details, paperItems);
       toast.success(
         details.is_instant
           ? `Instant Exam live! Key: ${result.key} · PIN: ${result.pin} · 60 min join window`

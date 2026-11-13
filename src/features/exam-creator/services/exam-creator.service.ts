@@ -34,12 +34,19 @@ export async function fetchTeacherExams(userId: string): Promise<ExamRow[]> {
   );
 }
 
-export async function saveExamDetails(
+export async function saveAllQuestions(
   userId: string,
   details: ExamDetails,
-  editingExamId: string | null,
-  existingExam: ExamRow | undefined
+  savedExamId: string | null,
+  existingExam: ExamRow | undefined,
+  paperItems: PaperItem[]
 ): Promise<string> {
+  const questions = getQuestionsFromItems(paperItems);
+  if (questions.length === 0) throw new Error('Add at least one question.');
+  for (const q of questions) {
+    if (!q.question_text.trim() && !q.question_image) throw new Error('Each question needs text or an image.');
+  }
+
   const now = new Date();
   let scheduled_at: string | null = null;
 
@@ -53,7 +60,8 @@ export async function saveExamDetails(
     ? new Date(now.getTime() + 60 * 60 * 1000).toISOString()
     : null;
 
-  const payload = {
+  const examPayload = {
+    ...(savedExamId ? { id: savedExamId } : {}),
     teacher_id: userId,
     batch_id: details.batch_ids[0],
     batch_ids: details.batch_ids,
@@ -71,48 +79,24 @@ export async function saveExamDetails(
     negative_marks_per_wrong: 0,
     is_published: existingExam ? existingExam.is_published : false,
     status: existingExam ? existingExam.status : 'draft',
+    exam_type: 'test',
+    board_tag: null,
   };
-
-  if (editingExamId) {
-    const { error } = await supabase.from('exams').update(payload).eq('id', editingExamId);
-    if (error) throw error;
-    return editingExamId;
-  } else {
-    const { data, error } = await supabase.from('exams').insert(payload).select().single();
-    if (error || !data) throw error ?? new Error('Failed to create exam');
-    return data.id;
-  }
-}
-
-export async function saveAllQuestions(savedExamId: string, paperItems: PaperItem[]): Promise<boolean> {
-  const questions = getQuestionsFromItems(paperItems);
-  if (questions.length === 0) throw new Error('Add at least one question.');
-
-  for (const q of questions) {
-    if (!q.question_text.trim() && !q.question_image) {
-      throw new Error('Each question needs text or an image.');
-    }
-  }
 
   const sectionTitleMap = new Map<string, string>();
   for (const item of paperItems) {
     if (item.itemType === 'section') sectionTitleMap.set(item.id, (item as SectionItem).title);
   }
 
-  const existingIds = questions.filter((q) => q.dbId).map((q) => q.dbId!);
-  const { data: dbQuestions } = await supabase.from('questions').select('id').eq('exam_id', savedExamId);
-  const toDelete = (dbQuestions ?? []).map((r) => r.id).filter((id) => !existingIds.includes(id));
-  if (toDelete.length > 0) {
-    await supabase.from('questions').delete().in('id', toDelete);
-  }
-
   let orderIndex = 0;
+  const questionPayloads: Array<Record<string, unknown>> = [];
   for (const q of questions) {
     const sectionTitle = q.sectionId ? sectionTitleMap.get(q.sectionId) ?? null : null;
     const optionTexts = q.options.map((o) => o.text);
     const optionImages = q.options.map((o) => o.imageUrl);
-    const payload = {
-      exam_id: savedExamId,
+    const questionId = q.dbId ?? crypto.randomUUID();
+    questionPayloads.push({
+      id: questionId,
       question_text: q.question_text,
       question_image: q.question_image,
       question_type: q.question_type,
@@ -127,21 +111,16 @@ export async function saveAllQuestions(savedExamId: string, paperItems: PaperIte
       is_pyq: q.is_pyq,
       section_title: sectionTitle,
       order_index: orderIndex++,
-    };
-
-    if (q.dbId) {
-      const { error } = await supabase.from('questions').update(payload).eq('id', q.dbId);
-      if (error) throw error;
-    } else {
-      const { data, error } = await supabase.from('questions').insert(payload).select('id').single();
-      if (error || !data) throw error ?? new Error('Insert failed');
-      q.dbId = data.id;
-    }
+    });
+    q.dbId = questionId;
   }
 
-  const totalMarks = questions.reduce((s, q) => s + q.positive_marks, 0);
-  await supabase.from('exams').update({ total_marks: totalMarks }).eq('id', savedExamId);
-  return true;
+  const { data, error } = await supabase.rpc('save_exam_paper', {
+    p_exam: examPayload,
+    p_questions: questionPayloads,
+  });
+  if (error || !data) throw error ?? new Error('Failed to save exam paper');
+  return data;
 }
 
 export async function publishExamKey(
@@ -175,36 +154,9 @@ export async function publishExamKey(
 }
 
 export async function duplicateExamService(userId: string, exam: ExamRow): Promise<void> {
-  const { data: newExam, error: examErr } = await supabase.from('exams').insert({
-    teacher_id: userId,
-    batch_id: exam.batch_id,
-    batch_ids: exam.batch_ids,
-    title: `${exam.title} (Copy)`,
-    subject: exam.subject,
-    duration_minutes: exam.duration_minutes,
-    total_marks: 0,
-    scheduled_at: exam.scheduled_at,
-    allow_pyq: exam.allow_pyq,
-    no_reverse_back: exam.no_reverse_back,
-    per_question_time_seconds: exam.per_question_time_seconds,
-    negative_marking: false,
-    negative_marks_per_wrong: 0,
-    is_published: false,
-    status: 'draft',
-  }).select().single();
-
-  if (examErr || !newExam) throw examErr ?? new Error('Duplicate failed');
-
-  const { data: srcQuestions } = await supabase.from('questions').select('*').eq('exam_id', exam.id).order('order_index');
-  if (srcQuestions && srcQuestions.length > 0) {
-    await supabase.from('questions').insert(
-      srcQuestions.map((q) => {
-        const copy = { ...q, exam_id: newExam.id };
-        delete (copy as { id?: string }).id;
-        return copy;
-      })
-    );
-  }
+  if (exam.teacher_id !== userId) throw new Error('Exam not found or unauthorized');
+  const { error } = await supabase.rpc('duplicate_exam', { p_exam_id: exam.id });
+  if (error) throw error;
 }
 
 export async function duplicateExam(exam: ExamRow, userId: string): Promise<boolean> {
