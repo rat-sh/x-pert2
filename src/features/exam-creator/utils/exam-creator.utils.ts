@@ -3,11 +3,15 @@ import { PaperItem, SectionItem, blankQuestion, blankSection } from '@/features/
 
 export function generateKey(): string {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ0123456789';
-  return 'EXM' + Array.from({ length: 10 }, () => chars[Math.floor(Math.random() * chars.length)]).join('');
+  const random = new Uint32Array(10);
+  crypto.getRandomValues(random);
+  return 'EXM' + Array.from(random, (value) => chars[value % chars.length]).join('');
 }
 
 export function generatePin(): string {
-  return String(Math.floor(100000 + Math.random() * 900000));
+  const random = new Uint32Array(1);
+  crypto.getRandomValues(random);
+  return String(100000 + (random[0] % 900000));
 }
 
 export function statusBadge(status: string | undefined): { label: string; className: string } {

@@ -337,4 +337,12 @@ export interface DatabaseFunctions {
     Args: Record<string, never>;
     Returns: UserProfile[];
   };
+  save_exam_paper: {
+    Args: { p_exam: Record<string, unknown>; p_questions: unknown };
+    Returns: string;
+  };
+  duplicate_exam: {
+    Args: { p_exam_id: string };
+    Returns: string;
+  };
 }
