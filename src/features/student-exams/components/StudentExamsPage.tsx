@@ -37,10 +37,11 @@ interface ExamQuestion {
   section_title?: string | null;
 }
 
-const normalizeOptions = (options: ExamQuestion['options']) => {
-  if (Array.isArray(options) || !options) return options;
+const normalizeOptions = (options: unknown): string[] | null => {
+  if (Array.isArray(options) && options.every((option): option is string => typeof option === 'string')) return options;
+  if (typeof options !== 'string' || !options) return null;
   try {
-    const parsed: unknown = JSON.parse(options as unknown as string);
+    const parsed: unknown = JSON.parse(options);
     return Array.isArray(parsed) && parsed.every((option) => typeof option === 'string') ? parsed : null;
   } catch {
     return null;
@@ -69,6 +70,10 @@ export function StudentExamsPage() {
   const questionTimeRemainingRef = useRef<number | null>(null);
   const questionTimesRef = useRef<Record<string, number>>({});
   const isSubmittingRef = useRef(false);
+  const saveTimerRef = useRef<number | null>(null);
+  const saveQueueRef = useRef<Promise<void>>(Promise.resolve());
+  const saveFailureNotifiedRef = useRef(false);
+  const tabSwitchLastAtRef = useRef(0);
 
   const clearTimer = () => {
     if (timerRef.current) {
@@ -99,36 +104,51 @@ export function StudentExamsPage() {
       return;
     }
 
-    const selection = 'id, title, subject, duration_minutes, total_marks, scheduled_at, is_instant, instant_expires_at, no_reverse_back, per_question_time_seconds, batches(name), exam_submissions(total_score, submitted_at)';
-    const [legacyResult, multiBatchResult] = await Promise.all([
-      supabase.from('exams').select(selection).eq('is_published', true).in('batch_id', batchIds).order('created_at', { ascending: false }),
-      supabase.from('exams').select(selection).eq('is_published', true).overlaps('batch_ids', batchIds).order('created_at', { ascending: false }),
-    ]);
+    const { data: examData, error: examError } = await supabase
+      .from('student_exams_view')
+      .select('id, title, subject, duration_minutes, total_marks, scheduled_at, is_instant, instant_expires_at, no_reverse_back, per_question_time_seconds, created_at')
+      .order('created_at', { ascending: false });
 
-    if (legacyResult.error || multiBatchResult.error) {
-      toast.error(legacyResult.error?.message ?? multiBatchResult.error?.message ?? 'Could not load exams');
+    if (examError) {
+      toast.error('Could not load exams');
       setLoading(false);
       return;
     }
 
-    const visibleExams = Array.from(new Map([...(legacyResult.data ?? []), ...(multiBatchResult.data ?? [])].map((exam) => [exam.id, exam])).values());
+    const visibleExams = examData ?? [];
+    const { data: submissionData, error: submissionError } = await supabase
+      .from('exam_submissions')
+      .select('exam_id, total_score, submitted_at')
+      .eq('student_id', student.id)
+      .in('exam_id', visibleExams.map((exam) => exam.id));
+
+    if (submissionError) {
+      toast.error('Could not load your exam progress');
+      setLoading(false);
+      return;
+    }
+
+    const submissionsByExam = new Map((submissionData ?? []).map((submission) => [submission.exam_id, submission]));
     setExams(visibleExams.map((exam) => {
-      const submission = Array.isArray(exam.exam_submissions) ? exam.exam_submissions[0] : null;
-      const batch = Array.isArray(exam.batches) ? exam.batches[0] : exam.batches;
+      const submission = submissionsByExam.get(exam.id);
       return {
         ...exam,
         no_reverse_back: exam.no_reverse_back ?? false,
         per_question_time_seconds: exam.per_question_time_seconds ?? null,
-        batch_name: batch?.name ?? 'Assigned batch',
+        batch_name: 'Assigned batch',
         submitted: Boolean(submission?.submitted_at),
         total_score: submission?.total_score ?? null,
       };
-    }) as StudentExamRow[]);
+    }));
     setLoading(false);
   }, [student]);
 
   const leaveExam = useCallback(() => {
     clearTimer();
+    if (saveTimerRef.current) {
+      window.clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = null;
+    }
     setView('list');
     setCurrentExam(null);
     setQuestions([]);
@@ -137,6 +157,40 @@ export function StudentExamsPage() {
     setQuestionTimeRemaining(null);
     questionTimeRemainingRef.current = null;
     questionTimesRef.current = {};
+  }, []);
+
+  const persistAnswers = useCallback((answerSet: Record<string, string>) => {
+    const submissionId = submissionIdRef.current;
+    if (!submissionId) return Promise.resolve();
+
+    const answerPayload = Object.entries(answerSet).map(([question_id, student_answer]) => ({
+      question_id,
+      student_answer,
+    }));
+    const saveWithRetry = async () => {
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        const { error } = await supabase.rpc('save_exam_answers', {
+          p_submission_id: submissionId,
+          p_answers: answerPayload,
+        });
+        if (!error) {
+          saveFailureNotifiedRef.current = false;
+          return;
+        }
+        if (attempt < 2) {
+          await new Promise((resolve) => window.setTimeout(resolve, 400 * (attempt + 1)));
+        }
+      }
+
+      if (!saveFailureNotifiedRef.current) {
+        saveFailureNotifiedRef.current = true;
+        toast.error('Answers could not be saved yet. Keep this exam open and try again.');
+      }
+    };
+
+    const queuedSave = saveQueueRef.current.then(saveWithRetry, saveWithRetry);
+    saveQueueRef.current = queuedSave.then(() => undefined, () => undefined);
+    return queuedSave;
   }, []);
 
   const submitExam = useCallback(async (exam: StudentExamRow, answerSet = answersRef.current) => {
@@ -177,6 +231,31 @@ export function StudentExamsPage() {
   }, [fetchExams]);
 
   useEffect(() => () => clearTimer(), []);
+
+  useEffect(() => {
+    if (view !== 'taking' || !submissionIdRef.current) return;
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState !== 'hidden') return;
+
+      if (saveTimerRef.current) {
+        window.clearTimeout(saveTimerRef.current);
+        saveTimerRef.current = null;
+      }
+      void persistAnswers(answersRef.current);
+
+      const now = Date.now();
+      if (now - tabSwitchLastAtRef.current < 1_500) return;
+      tabSwitchLastAtRef.current = now;
+      const submissionId = submissionIdRef.current;
+      if (submissionId) {
+        void supabase.rpc('record_tab_switch', { p_submission_id: submissionId });
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+  }, [persistAnswers, view]);
 
   useEffect(() => {
     if (view !== 'taking' || !currentExam || !questions.length || timerRef.current) return;
@@ -235,7 +314,8 @@ export function StudentExamsPage() {
     if (!student) return;
     setStarting(true);
     const { data: startData, error: startError } = await supabase.rpc('start_exam', { p_exam_id: exam.id });
-    if (startError || !startData?.[0]) {
+    const started = Array.isArray(startData) ? startData[0] : null;
+    if (startError || !started || typeof started.submission_id !== 'string' || typeof started.server_end_time !== 'string') {
       toast.error(startError?.message ?? 'Could not start exam');
       setStarting(false);
       return;
@@ -243,7 +323,7 @@ export function StudentExamsPage() {
 
     const { data: questionData, error: questionError } = await supabase
       .from('student_questions_view')
-      .select('*')
+      .select('id, exam_id, question_text, question_type, options, option_images, question_image, marks, positive_marks, negative_marks, section_title')
       .eq('exam_id', exam.id)
       .order('order_index');
     if (questionError || !questionData?.length) {
@@ -252,26 +332,54 @@ export function StudentExamsPage() {
       return;
     }
 
-    const parsedQuestions = (questionData as ExamQuestion[]).map((question) => ({ ...question, options: normalizeOptions(question.options) }));
-    const submission = startData[0] as { submission_id: string; server_end_time: string };
+    const parsedQuestions: ExamQuestion[] = questionData.map((question) => ({
+      id: question.id,
+      question_text: question.question_text,
+      question_type: question.question_type,
+      options: normalizeOptions(question.options),
+      option_images: Array.isArray(question.option_images) ? question.option_images.filter((image): image is string | null => typeof image === 'string' || image === null) : null,
+      question_image: question.question_image,
+      marks: question.marks,
+      positive_marks: question.positive_marks,
+      negative_marks: question.negative_marks,
+      section_title: question.section_title,
+    }));
     // eslint-disable-next-line react-hooks/purity -- this interaction handler sets the server timer boundary.
-    const remaining = Math.max(0, Math.floor((new Date(submission.server_end_time).getTime() - Date.now()) / 1_000));
+    const remaining = Math.max(0, Math.floor((new Date(started.server_end_time).getTime() - Date.now()) / 1_000));
     if (!remaining) {
       toast.error('The exam time has already expired.');
       setStarting(false);
       return;
     }
 
-    submissionIdRef.current = submission.submission_id;
+    const { data: savedAnswerData, error: savedAnswerError } = await supabase
+      .from('submission_answers')
+      .select('question_id, student_answer')
+      .eq('submission_id', started.submission_id);
+    if (savedAnswerError) {
+      toast.error('Could not restore saved answers. Please try starting again.');
+      setStarting(false);
+      return;
+    }
+    const restoredAnswers: Record<string, string> = {};
+    for (const savedAnswer of savedAnswerData ?? []) {
+      if (typeof savedAnswer.student_answer === 'string') {
+        restoredAnswers[savedAnswer.question_id] = savedAnswer.student_answer;
+      }
+    }
+
+    submissionIdRef.current = started.submission_id;
     questionsRef.current = parsedQuestions;
-    answersRef.current = {};
+    answersRef.current = restoredAnswers;
+    saveFailureNotifiedRef.current = false;
+    tabSwitchLastAtRef.current = 0;
     activeQuestionIndexRef.current = 0;
     timeRemainingRef.current = remaining;
     questionTimeRemainingRef.current = exam.per_question_time_seconds;
     questionTimesRef.current = Object.fromEntries(parsedQuestions.map((question) => [question.id, exam.per_question_time_seconds ?? 0]));
     setCurrentExam(exam);
     setQuestions(parsedQuestions);
-    setAnswers({});
+    setAnswers(restoredAnswers);
     setActiveQuestionIndex(0);
     setTimeRemaining(remaining);
     setQuestionTimeRemaining(exam.per_question_time_seconds);
@@ -280,11 +388,14 @@ export function StudentExamsPage() {
   };
 
   const setAnswer = (questionId: string, answer: string) => {
-    setAnswers((previous) => {
-      const updated = { ...previous, [questionId]: answer };
-      answersRef.current = updated;
-      return updated;
-    });
+    const updated = { ...answersRef.current, [questionId]: answer };
+    answersRef.current = updated;
+    setAnswers(updated);
+    if (saveTimerRef.current) window.clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = window.setTimeout(() => {
+      saveTimerRef.current = null;
+      void persistAnswers(updated);
+    }, 2_000);
   };
 
   const goToQuestion = (nextIndex: number) => {
