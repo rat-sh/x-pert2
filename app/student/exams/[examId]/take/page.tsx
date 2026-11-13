@@ -11,10 +11,11 @@ export const metadata: Metadata = {
 import { redirect } from 'next/navigation';
 
 interface Props {
-  params: { examId: string };
+  params: Promise<{ examId: string }>;
 }
 
-export default function ExamTakePage({ params }: Props) {
+export default async function ExamTakePage({ params }: Props) {
+  const { examId } = await params;
   // Redirect to student exams page with examId as query param
-  redirect(`/student/exams?take=${params.examId}`);
+  redirect(`/student/exams?take=${examId}`);
 }
