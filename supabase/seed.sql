@@ -1,0 +1,1 @@
+-- Intentionally empty. Keeps the configured local seed path valid.
