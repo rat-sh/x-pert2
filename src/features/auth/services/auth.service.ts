@@ -1,5 +1,6 @@
 import { supabase } from '@/shared/services/supabase-client';
 import type { SignupInput } from '@/features/auth/schemas/auth.schema';
+import type { UserProfile } from '@/shared/types/database.types';
 
 /**
  * auth.service.ts
@@ -69,11 +70,21 @@ export async function updatePassword(newPassword: string) {
 /**
  * Fetches the UserProfile row from the `users` table for the given userId.
  */
-export async function fetchProfile(userId: string) {
-  const { data, error } = await supabase
-    .from('users')
-    .select('*')
-    .eq('id', userId)
-    .single();
-  return { data, error };
+function isUserProfile(value: unknown): value is UserProfile {
+  if (typeof value !== 'object' || value === null) return false;
+  return 'id' in value && typeof value.id === 'string'
+    && 'full_name' in value && typeof value.full_name === 'string'
+    && 'role' in value && (value.role === 'teacher' || value.role === 'student' || value.role === 'parent')
+    && 'email' in value && (typeof value.email === 'string' || value.email === null)
+    && 'phone' in value && (typeof value.phone === 'string' || value.phone === null)
+    && 'created_at' in value && typeof value.created_at === 'string';
+}
+
+export async function fetchProfile(userId: string): Promise<{ data: UserProfile | null; error: Error | null }> {
+  const { data, error } = await supabase.rpc('get_my_user_profile').maybeSingle();
+  if (error) return { data: null, error };
+  if (!isUserProfile(data) || data.id !== userId) {
+    return { data: null, error: new Error('Profile does not match the authenticated user.') };
+  }
+  return { data, error: null };
 }
