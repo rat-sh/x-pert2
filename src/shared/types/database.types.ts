@@ -241,3 +241,68 @@ export interface TodoItem {
   is_batch_wide: boolean;
   created_at: string;
 }
+
+export interface StudentExamViewRow {
+  id: string;
+  batch_id: string | null;
+  batch_ids: string[] | null;
+  teacher_id: string;
+  title: string;
+  subject: string | null;
+  exam_type: ExamType;
+  board_tag: BoardTag | null;
+  duration_minutes: number;
+  total_marks: number;
+  negative_marking: boolean;
+  negative_marks_per_wrong: number;
+  is_published: boolean;
+  status: ExamStatus;
+  allow_pyq: boolean;
+  no_reverse_back: boolean;
+  per_question_time_seconds: number | null;
+  is_instant: boolean;
+  instant_expires_at: string | null;
+  scheduled_at: string | null;
+  created_at: string;
+}
+
+export interface StudentQuestionViewRow {
+  id: string;
+  exam_id: string | null;
+  question_text: string;
+  question_type: QuestionType;
+  options: unknown;
+  marks: number;
+  positive_marks: number;
+  negative_marks: number;
+  option_images: unknown;
+  question_image: string | null;
+  chapter_tag: string | null;
+  difficulty: Difficulty;
+  order_index: number;
+  is_pyq: boolean;
+  section_title: string | null;
+}
+
+export interface StudentResultViewRow {
+  submission_id: string;
+  exam_id: string;
+  exam_title: string;
+  total_score: number | null;
+  total_marks: number;
+  started_at: string;
+  submitted_at: string;
+  percentage: number | null;
+}
+
+export interface StudentAnswerReviewViewRow {
+  submission_id: string;
+  question_id: string;
+  question_text: string;
+  question_type: QuestionType;
+  correct_answer: string | null;
+  student_answer: string | null;
+  is_correct: boolean | null;
+  marks_awarded: number | null;
+  max_marks: number;
+}
