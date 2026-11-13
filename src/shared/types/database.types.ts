@@ -116,6 +116,7 @@ export interface ExamSubmission {
   percentage?: number | null;
   rank_in_batch?: number | null;
   tab_switch_count: number;
+  is_late: boolean;
   exams?: Exam;
   users?: UserProfile;
   batches?: Batch;
@@ -305,4 +306,35 @@ export interface StudentAnswerReviewViewRow {
   is_correct: boolean | null;
   marks_awarded: number | null;
   max_marks: number;
+}
+
+export interface DatabaseFunctions {
+  current_user_role: {
+    Args: Record<string, never>;
+    Returns: UserRole | null;
+  };
+  start_exam: {
+    Args: { p_exam_id: string };
+    Returns: Array<{ submission_id: string; server_end_time: string }>;
+  };
+  submit_exam: {
+    Args: { p_submission_id: string; p_answers: unknown };
+    Returns: Array<{ total_score: number; percentage: number }>;
+  };
+  join_batch_by_code: {
+    Args: { p_join_code: string };
+    Returns: Array<{ out_batch_id: string; out_batch_name: string; out_teacher_name: string }>;
+  };
+  save_exam_answers: {
+    Args: { p_submission_id: string; p_answers: unknown };
+    Returns: undefined;
+  };
+  record_tab_switch: {
+    Args: { p_submission_id: string };
+    Returns: number;
+  };
+  get_my_user_profile: {
+    Args: Record<string, never>;
+    Returns: UserProfile[];
+  };
 }

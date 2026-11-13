@@ -5,7 +5,6 @@ export interface StudentExamRow {
   duration_minutes: number;
   total_marks: number;
   scheduled_at?: string | null;
-  exam_key?: string | null;
   status?: string;
   is_instant?: boolean;
   allow_pyq?: boolean;
@@ -14,7 +13,7 @@ export interface StudentExamRow {
   batch_name?: string;
   batch_id?: string | null;
   batch_ids?: string[] | null;
-  submission?: { id: string; score: number; submitted_at: string } | null;
+  submission?: { id: string; total_score: number | null; submitted_at: string } | null;
 }
 
 export interface ExamQuestion {

@@ -31,13 +31,11 @@ export function StudentProvider({ children }: { children: React.ReactNode }) {
       p_join_code: joinCode.trim(),
     });
 
-    if (error || !data?.[0]) return null;
-
-    const row = data[0] as {
-      out_batch_id: string;
-      out_batch_name: string;
-      out_teacher_name: string;
-    };
+    const row = Array.isArray(data) ? data[0] : null;
+    if (error || !row
+      || typeof row.out_batch_id !== 'string'
+      || typeof row.out_batch_name !== 'string'
+      || typeof row.out_teacher_name !== 'string') return null;
 
     return {
       batchId: row.out_batch_id,
