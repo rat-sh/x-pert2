@@ -13,6 +13,7 @@ if [ "${SKIP_DB:-0}" != "1" ]; then
   npx --yes supabase start --exclude studio
   npx supabase db reset
   npx supabase test db
+  npx supabase stop
 fi
 bun install --frozen-lockfile
 node node_modules/typescript/bin/tsc --noEmit
