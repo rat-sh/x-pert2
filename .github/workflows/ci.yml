@@ -27,6 +27,7 @@ jobs:
         shell: bash
         run: |
           if command -v supabase >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
+            supabase start --exclude studio --ignore-health-check
             supabase test db
           else
             echo "Skipping Supabase database tests: CLI or Docker is unavailable."
