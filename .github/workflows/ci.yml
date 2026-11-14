@@ -1,0 +1,33 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+      - run: bun install --frozen-lockfile
+      - run: bun run lint
+      - run: bunx --no-install tsc --noEmit
+      - run: bun run test
+      - run: bun run build
+      - name: Supabase database tests
+        shell: bash
+        run: |
+          if command -v supabase >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
+            supabase test db
+          else
+            echo "Skipping Supabase database tests: CLI or Docker is unavailable."
+          fi

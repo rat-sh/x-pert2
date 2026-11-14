@@ -18,11 +18,11 @@ Just the tools a hardworking independent teacher actually needs.
 
 - **Batches with join codes** — students enroll themselves with a unique code
 - **Four question types** — MCQ, True/False, Numerical, Theoretical — with image support for questions and options
-- **Real exam controls** — global duration, per-question timers, "No Reverse Back" mode, auto-submit when time expires, optional exam PIN
+- **Real exam controls** — global duration, per-question timers, "No Reverse Back" mode, auto-submit when time expires
 - **Positive and negative marking** with automatic grading of objective questions
 - **Results that teachers can use** — question-by-question breakdown, percentage, rank in batch, PDF export
 - **Teacher toolkit** — question bank, question paper builder, question extraction upload, study materials, calendar, upcoming exams
-- **Developer-friendly codebase** — feature-sliced architecture, end-to-end TypeScript, Zod validation, full database schema included
+- **Developer-friendly codebase** — feature-sliced architecture, TypeScript, Zod validation, ordered Supabase migrations
 
 ### Who Is This For?
 
@@ -107,9 +107,9 @@ X-Pert targets exactly this high-frequency pain point.
   Join a batch via unique code, view exams, take timed exams, view detailed results and breakdowns, upcoming exams, study materials
 
 - **Supabase Backend**  
-  Authentication, PostgreSQL database, Storage for images, and Row Level Security policies defined in the included schema
+  Authentication, PostgreSQL database, Storage for images, with access controlled through row level security and database RPCs
 
-- **Complete database schema** — `supabase/schema.sql`, plus matching TypeScript types
+- **Database migrations** — ordered SQL files in `supabase/migrations/`, plus matching TypeScript types
 - **Full TypeScript + Zod validation** across forms and API inputs
 - **Grading engine** supporting positive and negative marking
 - **Exam controls** — per-question timers, "No Reverse Back" mode, automatic submission
@@ -353,7 +353,7 @@ X-Pert/
 │
 ├── public/                           # Static assets
 ├── supabase/
-│   └── schema.sql                    # Full database schema + recommended RLS
+│   └── migrations/                   # Ordered database migrations
 ├── package.json
 ├── tsconfig.json
 ├── next.config.ts
@@ -369,7 +369,7 @@ This structure is intentional. A new developer can open any feature folder and i
 ### 1. Authentication & Security
 - Role-based access (Teacher / Student)
 - Protected routes using Supabase Auth + JWT
-- Row Level Security (RLS) policies defined in `supabase/schema.sql`
+- Row Level Security (RLS) policies and database RPCs enforce the data access boundary
 - Duplicate submission prevention
 - Service role key kept server-only
 
@@ -394,7 +394,7 @@ This structure is intentional. A new developer can open any feature folder and i
 - Automatic test submission when time expires
 - Positive and negative marking
 - Instant exams or scheduled exams
-- Optional exam PIN / key protection
+- Exam keys and PINs are hidden from student views; they are not currently enforced as an access gate
 - Exam status flow: draft → scheduled → active → completed → archived
 
 ### 4. Results & Analytics
@@ -420,11 +420,11 @@ This structure is intentional. A new developer can open any feature folder and i
 
 ## Database Overview
 
-The complete SQL schema (tables, indexes, and recommended RLS policies) is provided in:
+The ordered migrations define the tables, indexes, policies, views, and RPCs in:
 
-```
-supabase/schema.sql
-```
+`supabase/migrations/` contains the ordered SQL migrations that define the database schema.
+
+Migration files: `000_helper_functions.sql`, `00_extensions_and_enums.sql`, `01_users.sql`, `02_teachers.sql`, `04_batches.sql`, `05_batch_enrollments.sql`, `07_exams.sql`, `08_questions.sql`, `09_exam_submissions.sql`, `10_submission_answers.sql`, `11_calendar_schedules.sql`, `12_assignments.sql`, `13_attendance.sql`, `14_notes.sql`, `15_recordings_sql.sql`, `16_doubts.sql`, `17_payment_logs.sql`, `18_todo_items.sql`, `19_live_exam_integrity_patch.sql`, `20_study_materials.sql`, `21_exam_integrity.sql`, `22_student_views.sql`, `23_autosave.sql`, `24_users_enrolment.sql`, and `25_save_exam.sql`.
 
 All TypeScript interfaces that match the database are defined in:
 
@@ -446,7 +446,9 @@ src/shared/types/database.types.ts
 - `calendar_schedules`
 - Additional supporting tables for attendance, doubts, payments, todos, and assignments — available for you to extend, and not part of the feature list above
 
-The schema is the single source of truth. Run the SQL file on a fresh Supabase project and the application is ready to use.
+The migrations are the database source of truth. Access is enforced by row level security and security definer RPCs for controlled writes. Exam submissions follow a scheduled or instant lifecycle, can be resumed while active, and are graded on submission; late submissions use saved answers. Exam key and PIN values are hidden from students but are not enforced as an access gate. Question extraction accepts PDF, PNG, JPG, and DOCX files up to 10 MB, is limited to 5 requests per 10 minutes and 30 per day per user on a single server instance, and may return partial results.
+
+Exam availability depends on publication, schedule, expiry, and active batch enrollment. Students start or resume attempts through `start_exam`; writes and grading go through database RPCs. Teacher sign-up remains open.
 
 ---
 
@@ -467,15 +469,15 @@ Create `.env.local` in the project root:
 ```env
 NEXT_PUBLIC_SUPABASE_URL=your_supabase_project_url
 NEXT_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
-SUPABASE_SERVICE_ROLE_KEY=your_supabase_service_role_key
+GEMINI_API_KEY=your_gemini_api_key
 ```
 
-**Important:** Never expose `SUPABASE_SERVICE_ROLE_KEY` to the browser.
+Use the blank `.env.example` as the list of supported environment variable names. Keep secret keys server-side.
 
 ### 3. Set up Supabase
 
 1. Create a new project at [https://supabase.com](https://supabase.com)
-2. Open the SQL Editor and run the entire contents of `supabase/schema.sql`
+2. Start local Supabase with `supabase start`, then apply migrations with `supabase db reset`. For a hosted project, link the project and run `supabase db push` after reviewing the pending migrations.
 3. Create a **public** storage bucket named `exam-images`
 4. Review the RLS policies and adjust them to your needs before going live
 
