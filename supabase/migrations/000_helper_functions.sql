@@ -34,10 +34,13 @@ $$;
 -- Function: Quick helper to get authenticated user role
 create or replace function public.current_user_role()
 returns text
-language sql
+language plpgsql
 stable
 security definer
+set search_path = public
 as $$
-  select role from public.users where id = auth.uid();
+begin
+  return (select role from public.users where id = auth.uid());
+end;
 $$;
 

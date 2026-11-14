@@ -15,7 +15,10 @@ export function useUpcomingExams() {
     setLoading(false);
   }, [user]);
 
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    const task = window.setTimeout(() => { void load(); }, 0);
+    return () => window.clearTimeout(task);
+  }, [load]);
 
   return { exams, loading, refresh: load };
 }

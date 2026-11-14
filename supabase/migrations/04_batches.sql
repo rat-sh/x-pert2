@@ -18,6 +18,17 @@ create table if not exists public.batches (
 create index if not exists idx_batches_teacher_id on public.batches(teacher_id);
 create index if not exists idx_batches_join_code on public.batches(join_code);
 
+-- Create the referenced relation before its policy; migration 05 repeats this
+-- idempotently and adds the enrollment indexes, RPC, and policies.
+create table if not exists public.batch_enrollments (
+  id uuid primary key default gen_random_uuid(),
+  batch_id uuid not null references public.batches(id) on delete cascade,
+  student_id uuid not null references public.users(id) on delete cascade,
+  enrolled_at timestamptz not null default now(),
+  is_active boolean not null default true,
+  constraint batch_enrollments_unique_student unique (batch_id, student_id)
+);
+
 -- Enable RLS & Policies
 alter table public.batches enable row level security;
 

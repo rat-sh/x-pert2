@@ -18,7 +18,10 @@ export function useStudentResults() {
     setLoading(false);
   }, [student]);
 
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    const task = window.setTimeout(() => { void load(); }, 0);
+    return () => window.clearTimeout(task);
+  }, [load]);
 
   const openReview = async (submissionId: string) => {
     setReviewId(submissionId);

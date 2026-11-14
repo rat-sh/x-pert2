@@ -170,7 +170,7 @@ export function SignupForm() {
                 onChange={(e) => handleChange('password', e.target.value)}
                 placeholder="••••••••"
                 autoComplete="new-password"
-                minLength={6}
+                minLength={8}
                 className={`w-full px-4 py-3 pr-12 border rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm transition-colors ${
                   errors.password ? 'border-red-400' : 'border-gray-300'
                 }`}

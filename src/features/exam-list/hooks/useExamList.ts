@@ -17,7 +17,10 @@ export function useExamList() {
     setLoading(false);
   }, [user]);
 
-  useEffect(() => { void refresh(); }, [refresh]);
+  useEffect(() => {
+    const task = window.setTimeout(() => { void refresh(); }, 0);
+    return () => window.clearTimeout(task);
+  }, [refresh]);
 
   return { exams, loading, refresh };
 }

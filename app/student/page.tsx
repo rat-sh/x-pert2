@@ -177,7 +177,7 @@ export default function StudentHomePage() {
 
                             {exam.submission ? (
                               <div className="flex items-center gap-2 text-green-600 bg-green-50 border border-green-200 px-3 py-1.5 rounded-lg text-xs font-medium shrink-0">
-                                <CheckCircle className="w-4 h-4" /> Score: {exam.submission.score}
+                                <CheckCircle className="w-4 h-4" /> Score: {exam.submission.total_score ?? 0}
                               </div>
                             ) : (
                               <Link
@@ -217,7 +217,7 @@ export default function StudentHomePage() {
                     </div>
                     {exam.submission ? (
                       <span className="text-xs font-medium text-green-600 bg-green-50 px-3 py-1.5 rounded-lg border border-green-200">
-                        Score: {exam.submission.score}
+                        Score: {exam.submission.total_score ?? 0}
                       </span>
                     ) : (
                       <Link

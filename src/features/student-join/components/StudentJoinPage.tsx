@@ -162,10 +162,10 @@ export function StudentJoinPage() {
               id="student-password"
               required
               type="password"
-              minLength={6}
+              minLength={8}
               value={form.password}
               onChange={(e) => setField('password', e.target.value)}
-              placeholder="At least 6 characters"
+              placeholder="At least 8 characters"
               autoComplete="new-password"
               className="w-full p-3 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
             />

@@ -116,6 +116,7 @@ export interface ExamSubmission {
   percentage?: number | null;
   rank_in_batch?: number | null;
   tab_switch_count: number;
+  is_late: boolean;
   exams?: Exam;
   users?: UserProfile;
   batches?: Batch;
@@ -240,4 +241,108 @@ export interface TodoItem {
   is_done: boolean;
   is_batch_wide: boolean;
   created_at: string;
+}
+
+export interface StudentExamViewRow {
+  id: string;
+  batch_id: string | null;
+  batch_ids: string[] | null;
+  teacher_id: string;
+  title: string;
+  subject: string | null;
+  exam_type: ExamType;
+  board_tag: BoardTag | null;
+  duration_minutes: number;
+  total_marks: number;
+  negative_marking: boolean;
+  negative_marks_per_wrong: number;
+  is_published: boolean;
+  status: ExamStatus;
+  allow_pyq: boolean;
+  no_reverse_back: boolean;
+  per_question_time_seconds: number | null;
+  is_instant: boolean;
+  instant_expires_at: string | null;
+  scheduled_at: string | null;
+  created_at: string;
+}
+
+export interface StudentQuestionViewRow {
+  id: string;
+  exam_id: string | null;
+  question_text: string;
+  question_type: QuestionType;
+  options: unknown;
+  marks: number;
+  positive_marks: number;
+  negative_marks: number;
+  option_images: unknown;
+  question_image: string | null;
+  chapter_tag: string | null;
+  difficulty: Difficulty;
+  order_index: number;
+  is_pyq: boolean;
+  section_title: string | null;
+}
+
+export interface StudentResultViewRow {
+  submission_id: string;
+  exam_id: string;
+  exam_title: string;
+  total_score: number | null;
+  total_marks: number;
+  started_at: string;
+  submitted_at: string;
+  percentage: number | null;
+}
+
+export interface StudentAnswerReviewViewRow {
+  submission_id: string;
+  question_id: string;
+  question_text: string;
+  question_type: QuestionType;
+  correct_answer: string | null;
+  student_answer: string | null;
+  is_correct: boolean | null;
+  marks_awarded: number | null;
+  max_marks: number;
+}
+
+export interface DatabaseFunctions {
+  current_user_role: {
+    Args: Record<string, never>;
+    Returns: UserRole | null;
+  };
+  start_exam: {
+    Args: { p_exam_id: string };
+    Returns: Array<{ submission_id: string; server_end_time: string }>;
+  };
+  submit_exam: {
+    Args: { p_submission_id: string; p_answers: unknown };
+    Returns: Array<{ total_score: number; percentage: number }>;
+  };
+  join_batch_by_code: {
+    Args: { p_join_code: string };
+    Returns: Array<{ out_batch_id: string; out_batch_name: string; out_teacher_name: string }>;
+  };
+  save_exam_answers: {
+    Args: { p_submission_id: string; p_answers: unknown };
+    Returns: undefined;
+  };
+  record_tab_switch: {
+    Args: { p_submission_id: string };
+    Returns: number;
+  };
+  get_my_user_profile: {
+    Args: Record<string, never>;
+    Returns: UserProfile[];
+  };
+  save_exam_paper: {
+    Args: { p_exam: Record<string, unknown>; p_questions: unknown };
+    Returns: string;
+  };
+  duplicate_exam: {
+    Args: { p_exam_id: string };
+    Returns: string;
+  };
 }

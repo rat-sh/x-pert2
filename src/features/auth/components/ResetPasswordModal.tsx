@@ -123,7 +123,8 @@ export function ResetPasswordModal({
                     type={showPass ? 'text' : 'password'}
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
-                    placeholder="At least 6 characters"
+                    minLength={8}
+                    placeholder="At least 8 characters"
                     className={`w-full px-4 py-2.5 pr-10 border rounded-lg focus:outline-none focus:ring-2 text-sm text-gray-900 ${
                       isTeacher ? 'focus:ring-indigo-500' : 'focus:ring-green-500'
                     } ${errors.password ? 'border-red-400' : 'border-gray-300'}`}

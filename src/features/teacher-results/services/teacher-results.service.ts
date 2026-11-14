@@ -3,22 +3,17 @@ import { supabase } from '@/shared/services/supabase-client';
 export async function fetchSubmissions(teacherId: string, examId?: string | null) {
   let query = supabase
     .from('exam_submissions')
-    .select('*, exams(title, subject, total_marks, teacher_id), users(full_name, email)')
+    .select('*, exams!inner(title, subject, total_marks, teacher_id), users(full_name, email)')
+    .eq('exams.teacher_id', teacherId)
     .order('submitted_at', { ascending: false });
 
   if (examId) {
     query = query.eq('exam_id', examId);
   }
 
-  const { data } = await query;
-  // Filter by teacher on client side since join filter syntax varies
-  const all = data ?? [];
-  if (!examId) {
-    return all.filter(
-      (s: { exams?: { teacher_id?: string } | null }) => s.exams?.teacher_id === teacherId,
-    );
-  }
-  return all;
+  const { data, error } = await query;
+  if (error) throw error;
+  return data ?? [];
 }
 
 export async function fetchTeacherExams(teacherId: string) {

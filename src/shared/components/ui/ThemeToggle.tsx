@@ -13,12 +13,15 @@ export function ThemeToggle() {
   const [dark, setDark] = useState(false);
 
   useEffect(() => {
-    const saved = localStorage.getItem('theme');
-    const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-    const isDark = saved ? saved === 'dark' : prefersDark;
+    const task = window.setTimeout(() => {
+      const saved = localStorage.getItem('theme');
+      const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+      const isDark = saved ? saved === 'dark' : prefersDark;
 
-    setDark(isDark);
-    document.documentElement.setAttribute('data-theme', isDark ? 'dark' : 'light');
+      setDark(isDark);
+      document.documentElement.setAttribute('data-theme', isDark ? 'dark' : 'light');
+    }, 0);
+    return () => window.clearTimeout(task);
   }, []);
 
   const toggle = () => {

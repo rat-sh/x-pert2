@@ -1,53 +1,53 @@
 import { supabase } from '@/shared/services/supabase-client';
-import type { StudentExamRow, ExamQuestion } from '../types/student-exams.types';
+import type { StudentExamRow } from '../types/student-exams.types';
 
 export async function fetchEnrolledExams(studentId: string): Promise<StudentExamRow[]> {
-  const { data: enrollments } = await supabase
+  const { data: enrollments, error: enrollmentError } = await supabase
     .from('batch_enrollments')
     .select('batch_id')
-    .eq('student_id', studentId);
-  const batchIds = (enrollments ?? []).map((e: { batch_id: string }) => e.batch_id);
+    .eq('student_id', studentId)
+    .eq('is_active', true);
+  if (enrollmentError) throw enrollmentError;
+
+  const batchIds = (enrollments ?? []).map((enrollment) => enrollment.batch_id);
   if (!batchIds.length) return [];
 
-  const { data: exams } = await supabase
-    .from('exams')
-    .select('*, batches(name)')
-    .in('batch_id', batchIds)
-    .eq('is_published', true)
-    .order('scheduled_at');
+  const [{ data: exams, error: examsError }, { data: batches, error: batchesError }] = await Promise.all([
+    supabase
+      .from('student_exams_view')
+      .select('id, batch_id, batch_ids, title, subject, duration_minutes, total_marks, scheduled_at, is_instant, status, allow_pyq, no_reverse_back, per_question_time_seconds, created_at')
+      .order('scheduled_at'),
+    supabase.from('batches').select('id, name').in('id', batchIds),
+  ]);
+  if (examsError) throw examsError;
+  if (batchesError) throw batchesError;
   if (!exams?.length) return [];
 
-  return Promise.all(exams.map(async (exam) => {
-    const { data: sub } = await supabase
-      .from('exam_submissions')
-      .select('id, score, submitted_at')
-      .eq('exam_id', exam.id)
-      .eq('student_id', studentId)
-      .maybeSingle();
-    return { ...exam, batch_name: (exam.batches as { name: string } | null)?.name ?? '', submission: sub ?? null } as StudentExamRow;
-  }));
-}
+  const { data: submissions, error: submissionsError } = await supabase
+    .from('exam_submissions')
+    .select('id, exam_id, total_score, submitted_at')
+    .eq('student_id', studentId)
+    .in('exam_id', exams.map((exam) => exam.id));
+  if (submissionsError) throw submissionsError;
 
-export async function fetchExamQuestions(examId: string): Promise<ExamQuestion[]> {
-  const { data } = await supabase.from('questions').select('*').eq('exam_id', examId).order('order_index');
-  return (data ?? []) as ExamQuestion[];
-}
+  const batchNames = new Map((batches ?? []).map((batch) => [batch.id, batch.name]));
+  const submittedExams = new Map(
+    (submissions ?? [])
+      .filter((submission) => submission.submitted_at !== null)
+      .map((submission) => [submission.exam_id, {
+        id: submission.id,
+        total_score: submission.total_score,
+        submitted_at: submission.submitted_at,
+      }]),
+  );
 
-export async function startExam(examId: string, studentId: string): Promise<string | null> {
-  const { data: existing } = await supabase
-    .from('exam_submissions').select('id').eq('exam_id', examId).eq('student_id', studentId).maybeSingle();
-  if (existing) return existing.id;
-  const { data, error } = await supabase.rpc('start_exam', { p_exam_id: examId, p_student_id: studentId });
-  if (error || !data) return null;
-  return typeof data === 'string' ? data : (data as { id?: string })?.id ?? null;
-}
-
-export async function submitExam(params: {
-  submissionId: string; examId: string; studentId: string; answers: Record<string, string>;
-}) {
-  const { error } = await supabase.rpc('submit_exam', {
-    p_submission_id: params.submissionId, p_exam_id: params.examId,
-    p_student_id: params.studentId, p_answers: params.answers,
+  return exams.map((exam) => {
+    const matchedBatchId = [exam.batch_id, ...(exam.batch_ids ?? [])]
+      .find((batchId): batchId is string => typeof batchId === 'string' && batchNames.has(batchId));
+    return {
+      ...exam,
+      batch_name: matchedBatchId ? batchNames.get(matchedBatchId) : undefined,
+      submission: submittedExams.get(exam.id) ?? null,
+    };
   });
-  return !error;
 }
