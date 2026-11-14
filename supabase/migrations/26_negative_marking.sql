@@ -227,7 +227,7 @@ grant select on public.student_result_view to authenticated;
 grant select on public.student_answer_review_view to authenticated;
 
 -- The client only needs profile fields used to render the signed-in account.
-drop function public.get_my_user_profile();
+drop function if exists public.get_my_user_profile();
 create function public.get_my_user_profile()
 returns table (
   id uuid,

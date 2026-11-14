@@ -181,7 +181,7 @@ export function TeacherResultsPage() {
             <table className="w-full">
               <thead className="bg-gray-50 border-b border-gray-200">
                 <tr>
-                  {['Student Name', 'Exam', 'Batch', 'Score', 'Status', 'Submitted', 'Actions'].map((h) => (
+                  {['Student Name', 'Exam', 'Batch', 'Score', 'Status', 'Tab switches', 'Submitted', 'Actions'].map((h) => (
                     <th key={h} className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wide">{h}</th>
                   ))}
                 </tr>
@@ -207,6 +207,7 @@ export function TeacherResultsPage() {
                           {passed ? 'Passed' : 'Failed'}
                         </span>
                       </td>
+                      <td className="px-6 py-4 text-sm text-gray-600">{s.tab_switch_count}</td>
                       <td className="px-6 py-4 text-sm text-gray-500">
                         {s.submitted_at ? new Date(s.submitted_at).toLocaleString() : '—'}
                       </td>

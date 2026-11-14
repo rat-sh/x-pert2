@@ -75,6 +75,7 @@ export interface Exam {
   instant_expires_at?: string | null;
   /** null = open exam (no time restriction) */
   scheduled_at: string | null;
+  ends_at?: string | null;
   created_at: string;
   // joined
   batches?: Batch;

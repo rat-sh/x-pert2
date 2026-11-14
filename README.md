@@ -388,7 +388,7 @@ This structure is intentional. A new developer can open any feature folder and i
   - Theoretical (subjective)
 - Image support for both questions and options
 - Question paper builder for assembling exams
-- Per-question timers
+- Per-question timers run on the client only; they are not enforced or persisted by the server.
 - Global exam duration
 - "No Reverse Back" mode (prevents going back to previous questions)
 - Automatic test submission when time expires
