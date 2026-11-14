@@ -477,7 +477,7 @@ Use the blank `.env.example` as the list of supported environment variable names
 ### 3. Set up Supabase
 
 1. Create a new project at [https://supabase.com](https://supabase.com)
-2. Start local Supabase with `supabase start`, then apply migrations with `supabase db reset`. For a hosted project, link the project and run `supabase db push` after reviewing the pending migrations.
+2. Start local Supabase with `supabase start --exclude studio`, then apply migrations with `supabase db reset`. **Live database state: UNVERIFIED.** The hosted database was created from dashboard SQL snippets and has no confirmed CLI migration history. Do not run a blind `supabase db push`; follow [the deployment safety steps](./docs/deployment.md) before applying migrations to a hosted database.
 3. Create a **public** storage bucket named `exam-images`
 4. Review the RLS policies and adjust them to your needs before going live
 

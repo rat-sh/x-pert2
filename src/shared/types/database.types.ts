@@ -12,7 +12,6 @@ export interface UserProfile {
   phone: string | null;
   preferred_language?: 'en' | 'hi';
   date_of_birth?: string | null;
-  pin_hash?: string | null;
   pin_set_at?: string | null;
   created_at: string;
 }

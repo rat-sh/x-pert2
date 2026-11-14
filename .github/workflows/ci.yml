@@ -24,11 +24,8 @@ jobs:
       - run: bun run test
       - run: bun run build
       - name: Supabase database tests
-        shell: bash
-        run: |
-          if command -v supabase >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
-            supabase start --exclude studio --ignore-health-check
-            supabase test db
-          else
-            echo "Skipping Supabase database tests: CLI or Docker is unavailable."
-          fi
+        run: supabase start --exclude studio
+      - name: Reset Supabase database
+        run: supabase db reset
+      - name: Run Supabase database tests
+        run: supabase test db

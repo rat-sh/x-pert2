@@ -1,6 +1,6 @@
 begin;
 
-select plan(8);
+select plan(9);
 set local role postgres;
 
 insert into auth.users (id, aud, role, email, encrypted_password, raw_user_meta_data)
@@ -41,6 +41,8 @@ select is_empty(
 );
 select is((select phone from public.get_my_user_profile()), '1234567890'::text,
   'own profile RPC returns own sensitive phone value');
+select ok(position('pin_hash' in pg_get_function_result('public.get_my_user_profile()'::regprocedure)) = 0,
+  'profile RPC does not expose the PIN hash');
 select is((select count(*)::integer from public.users where id = '00000000-0000-0000-0000-000000000201'::uuid), 1,
   'student can see own batch teacher profile');
 select set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-000000000201', false);

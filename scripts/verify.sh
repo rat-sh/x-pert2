@@ -10,7 +10,7 @@ if [ "${SKIP_DB:-0}" = "1" ]; then
 fi
 if [ "${SKIP_DB:-0}" != "1" ]; then
   docker info >/dev/null 2>&1 || { echo "BLOCKED: docker not running"; exit 2; }
-  npx --yes supabase start --exclude studio --ignore-health-check >/dev/null 2>&1 || true
+  npx --yes supabase start --exclude studio
   npx supabase db reset
   npx supabase test db
 fi

@@ -307,7 +307,8 @@ export function QuestionBankPage() {
 
   const handleDelete = async (exam: ExamBankRow) => {
     if (!confirm(`Delete "${exam.title}" and all its questions? This cannot be undone.`)) return;
-    await supabase.from('questions').delete().eq('exam_id', exam.id);
+    const { error: questionsError } = await supabase.from('questions').delete().eq('exam_id', exam.id);
+    if (questionsError) { toast.error(questionsError.message); return; }
     const { error } = await supabase.from('exams').delete().eq('id', exam.id);
     if (error) { toast.error('Delete failed'); return; }
     toast.success('Exam deleted.');
