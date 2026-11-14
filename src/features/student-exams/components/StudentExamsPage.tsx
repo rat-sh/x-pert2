@@ -1,10 +1,11 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { AlertCircle, CheckCircle, ChevronLeft, ChevronRight, Clock, Play, Zap } from 'lucide-react';
+import { AlertCircle, CheckCircle, ChevronLeft, ChevronRight, Clock, Play, Zap, Circle, Check, TriangleAlert } from 'lucide-react';
 import { toast } from 'sonner';
 import { supabase } from '@/shared/services/supabase-client';
 import { useStudent } from '@/contexts/StudentContext';
+import { calculateClockSnapshot, calculateRemainingSeconds, countAnswered } from '../utils/exam-utils';
 
 type ExamView = 'list' | 'taking';
 
@@ -17,6 +18,7 @@ interface StudentExamRow {
   scheduled_at: string | null;
   is_instant: boolean;
   instant_expires_at: string | null;
+  ends_at: string | null;
   no_reverse_back: boolean;
   per_question_time_seconds: number | null;
   batch_name: string;
@@ -61,6 +63,18 @@ export function StudentExamsPage() {
   const [timeRemaining, setTimeRemaining] = useState(0);
   const [questionTimeRemaining, setQuestionTimeRemaining] = useState<number | null>(null);
   const [answers, setAnswers] = useState<Record<string, string>>({});
+  const [submitDialogOpen, setSubmitDialogOpen] = useState(false);
+  const [submitError, setSubmitError] = useState(false);
+  const [saveStatus, setSaveStatus] = useState<'saved' | 'saving' | 'error'>('saved');
+  const [savedAt, setSavedAt] = useState<string | null>(null);
+  const [tabNotice, setTabNotice] = useState(false);
+  const [zoomedImage, setZoomedImage] = useState<string | null>(null);
+  const [announcedTime, setAnnouncedTime] = useState('');
+  const serverEndTimeRef = useRef<string | null>(null);
+  const serverOffsetRef = useRef(0);
+  const submittedRef = useRef(false);
+  const submitButtonRef = useRef<HTMLButtonElement>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const submissionIdRef = useRef<string | null>(null);
   const answersRef = useRef<Record<string, string>>({});
@@ -74,6 +88,7 @@ export function StudentExamsPage() {
   const saveQueueRef = useRef<Promise<void>>(Promise.resolve());
   const saveFailureNotifiedRef = useRef(false);
   const tabSwitchLastAtRef = useRef(0);
+  const hasShownTabNoticeRef = useRef(false);
 
   const clearTimer = () => {
     if (timerRef.current) {
@@ -81,6 +96,11 @@ export function StudentExamsPage() {
       timerRef.current = null;
     }
   };
+
+  const announceTimeIfThreshold = useCallback((seconds: number) => {
+    if ([300, 60].includes(seconds)) setAnnouncedTime(`${Math.floor(seconds / 60)} minutes remaining`);
+    if (seconds === 0) setAnnouncedTime('Time is up');
+  }, []);
 
   const fetchExams = useCallback(async () => {
     if (!student) return;
@@ -106,7 +126,7 @@ export function StudentExamsPage() {
 
     const { data: examData, error: examError } = await supabase
       .from('student_exams_view')
-      .select('id, title, subject, duration_minutes, total_marks, scheduled_at, is_instant, instant_expires_at, no_reverse_back, per_question_time_seconds, created_at')
+      .select('id, title, subject, duration_minutes, total_marks, scheduled_at, is_instant, instant_expires_at, ends_at, batch_name, no_reverse_back, per_question_time_seconds, created_at')
       .order('created_at', { ascending: false });
 
     if (examError) {
@@ -135,7 +155,7 @@ export function StudentExamsPage() {
         ...exam,
         no_reverse_back: exam.no_reverse_back ?? false,
         per_question_time_seconds: exam.per_question_time_seconds ?? null,
-        batch_name: 'Assigned batch',
+        batch_name: exam.batch_name ?? 'Batch',
         submitted: Boolean(submission?.submitted_at),
         total_score: submission?.total_score ?? null,
       };
@@ -154,6 +174,7 @@ export function StudentExamsPage() {
     setQuestions([]);
     questionsRef.current = [];
     submissionIdRef.current = null;
+    serverEndTimeRef.current = null;
     setQuestionTimeRemaining(null);
     questionTimeRemainingRef.current = null;
     questionTimesRef.current = {};
@@ -162,6 +183,7 @@ export function StudentExamsPage() {
   const persistAnswers = useCallback((answerSet: Record<string, string>) => {
     const submissionId = submissionIdRef.current;
     if (!submissionId) return Promise.resolve();
+    if (!submittedRef.current) setSaveStatus('saving');
 
     const answerPayload = Object.entries(answerSet).map(([question_id, student_answer]) => ({
       question_id,
@@ -175,6 +197,10 @@ export function StudentExamsPage() {
         });
         if (!error) {
           saveFailureNotifiedRef.current = false;
+          if (!submittedRef.current) {
+            setSaveStatus('saved');
+            setSavedAt(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false }));
+          }
           return;
         }
         if (attempt < 2) {
@@ -182,7 +208,10 @@ export function StudentExamsPage() {
         }
       }
 
-      if (!saveFailureNotifiedRef.current) {
+      if (!submittedRef.current) {
+        setSaveStatus('error');
+      }
+      if (!submittedRef.current && !saveFailureNotifiedRef.current) {
         saveFailureNotifiedRef.current = true;
         toast.error('Answers could not be saved yet. Keep this exam open and try again.');
       }
@@ -199,31 +228,45 @@ export function StudentExamsPage() {
     if (!submissionId) return;
 
     isSubmittingRef.current = true;
+    setSubmitError(false);
     setSubmitting(true);
     clearTimer();
+    if (saveTimerRef.current) {
+      window.clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = null;
+    }
+    await persistAnswers(answerSet);
+    await saveQueueRef.current;
     const answerPayload = questionsRef.current.map((question) => ({
       question_id: question.id,
       student_answer: answerSet[question.id] ?? '',
     }));
-    const { data: score, error } = await supabase.rpc('submit_exam', {
-      p_submission_id: submissionId,
-      p_answers: answerPayload,
-    });
+    let score: unknown = null;
+    let error: { message: string } | null = null;
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      const result = await supabase.rpc('submit_exam', { p_submission_id: submissionId, p_answers: answerPayload });
+      score = result.data;
+      error = result.error;
+      if (!error) break;
+      if (attempt < 3) await new Promise((resolve) => window.setTimeout(resolve, 1_000 * (2 ** attempt)));
+    }
 
     if (error) {
-      toast.error(`Submit failed: ${error.message}`);
+      setSubmitError(true);
       isSubmittingRef.current = false;
       setSubmitting(false);
       return;
     }
 
+    submittedRef.current = true;
+    setSubmitError(false);
     const result = Array.isArray(score) ? score[0] : score;
     toast.success(`Exam submitted! You scored ${result?.total_score ?? 0}/${exam.total_marks}`);
     leaveExam();
     isSubmittingRef.current = false;
     setSubmitting(false);
     void fetchExams();
-  }, [fetchExams, leaveExam]);
+  }, [fetchExams, leaveExam, persistAnswers]);
 
   useEffect(() => {
     const initialFetch = window.setTimeout(() => { void fetchExams(); }, 0);
@@ -233,10 +276,48 @@ export function StudentExamsPage() {
   useEffect(() => () => clearTimer(), []);
 
   useEffect(() => {
+    if (!submitDialogOpen) return;
+    const dialog = dialogRef.current;
+    const focusable = dialog?.querySelectorAll<HTMLElement>('button:not([disabled])');
+    focusable?.[0]?.focus();
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        setSubmitDialogOpen(false);
+        submitButtonRef.current?.focus();
+      } else if (event.key === 'Tab' && focusable?.length) {
+        const first = focusable[0];
+        const last = focusable[focusable.length - 1];
+        if (event.shiftKey && document.activeElement === first) {
+          event.preventDefault();
+          last.focus();
+        } else if (!event.shiftKey && document.activeElement === last) {
+          event.preventDefault();
+          first.focus();
+        }
+      }
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [submitDialogOpen]);
+
+  useEffect(() => {
     if (view !== 'taking' || !submissionIdRef.current) return;
 
     const handleVisibilityChange = () => {
-      if (document.visibilityState !== 'hidden') return;
+      if (document.visibilityState !== 'hidden') {
+        if (!hasShownTabNoticeRef.current) {
+          hasShownTabNoticeRef.current = true;
+          setTabNotice(true);
+        }
+        const endTime = serverEndTimeRef.current;
+        if (endTime) {
+          const remaining = calculateRemainingSeconds(endTime, Date.now(), serverOffsetRef.current);
+          setTimeRemaining(remaining);
+          announceTimeIfThreshold(remaining);
+        }
+        return;
+      }
 
       if (saveTimerRef.current) {
         window.clearTimeout(saveTimerRef.current);
@@ -255,15 +336,19 @@ export function StudentExamsPage() {
 
     document.addEventListener('visibilitychange', handleVisibilityChange);
     return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
-  }, [persistAnswers, view]);
+  }, [announceTimeIfThreshold, persistAnswers, view]);
 
   useEffect(() => {
     if (view !== 'taking' || !currentExam || !questions.length || timerRef.current) return;
 
     timerRef.current = setInterval(() => {
-      const nextOverallTime = Math.max(0, timeRemainingRef.current - 1);
+      const endTime = serverEndTimeRef.current;
+      const nextOverallTime = endTime
+        ? calculateRemainingSeconds(endTime, Date.now(), serverOffsetRef.current)
+        : 0;
       timeRemainingRef.current = nextOverallTime;
       setTimeRemaining(nextOverallTime);
+      announceTimeIfThreshold(nextOverallTime);
       if (nextOverallTime === 0) {
         clearTimer();
         void submitExam(currentExam, answersRef.current);
@@ -290,6 +375,8 @@ export function StudentExamsPage() {
 
       activeQuestionIndexRef.current = nextQuestionIndex;
       setActiveQuestionIndex(nextQuestionIndex);
+      const submissionId = submissionIdRef.current;
+      if (submissionId) sessionStorage.setItem(`exam-question-index:${submissionId}`, String(nextQuestionIndex));
       const nextQuestion = questionsRef.current[nextQuestionIndex];
       const nextQuestionTimeRemaining = questionTimesRef.current[nextQuestion.id] ?? currentExam.per_question_time_seconds;
       questionTimeRemainingRef.current = nextQuestionTimeRemaining;
@@ -297,10 +384,29 @@ export function StudentExamsPage() {
     }, 1_000);
 
     return clearTimer;
-  }, [currentExam, questions.length, submitExam, view]);
+  }, [announceTimeIfThreshold, currentExam, questions.length, submitExam, view]);
+
+  useEffect(() => {
+    if (view !== 'taking' || !serverEndTimeRef.current) return;
+    const resyncClock = async () => {
+      const { data } = await supabase.rpc('server_time');
+      if (typeof data === 'string') {
+        serverOffsetRef.current = new Date(data).getTime() - Date.now();
+        const endTime = serverEndTimeRef.current;
+        if (endTime) {
+          const remaining = calculateRemainingSeconds(endTime, Date.now(), serverOffsetRef.current);
+          setTimeRemaining(remaining);
+          announceTimeIfThreshold(remaining);
+        }
+      }
+    };
+    const interval = window.setInterval(() => { void resyncClock(); }, 60_000);
+    return () => window.clearInterval(interval);
+  }, [announceTimeIfThreshold, view]);
 
   const getStatus = (exam: StudentExamRow) => {
     if (exam.submitted) return 'completed';
+    if (exam.ends_at && new Date(exam.ends_at) < new Date()) return 'expired';
     if (exam.is_instant) {
       if (exam.instant_expires_at && new Date(exam.instant_expires_at) < new Date()) return 'expired';
       return 'ready';
@@ -344,14 +450,10 @@ export function StudentExamsPage() {
       negative_marks: question.negative_marks,
       section_title: question.section_title,
     }));
-    // eslint-disable-next-line react-hooks/purity -- this interaction handler sets the server timer boundary.
-    const remaining = Math.max(0, Math.floor((new Date(started.server_end_time).getTime() - Date.now()) / 1_000));
-    if (!remaining) {
-      toast.error('The exam time has already expired.');
-      setStarting(false);
-      return;
-    }
-
+    const { data: serverTime } = await supabase.rpc('server_time');
+    const clockSnapshot = calculateClockSnapshot(typeof serverTime === 'string' ? serverTime : null, started.server_end_time);
+    const serverOffset = clockSnapshot.serverOffsetMs;
+    const remaining = clockSnapshot.remainingSeconds;
     const { data: savedAnswerData, error: savedAnswerError } = await supabase
       .from('submission_answers')
       .select('question_id, student_answer')
@@ -369,18 +471,24 @@ export function StudentExamsPage() {
     }
 
     submissionIdRef.current = started.submission_id;
+    serverEndTimeRef.current = started.server_end_time;
+    serverOffsetRef.current = serverOffset;
+    submittedRef.current = false;
     questionsRef.current = parsedQuestions;
     answersRef.current = restoredAnswers;
     saveFailureNotifiedRef.current = false;
     tabSwitchLastAtRef.current = 0;
-    activeQuestionIndexRef.current = 0;
+    const questionStorageKey = `exam-question-index:${started.submission_id}`;
+    const storedIndex = Number(sessionStorage.getItem(questionStorageKey) ?? 0);
+    const restoredIndex = Number.isInteger(storedIndex) ? Math.min(Math.max(storedIndex, 0), parsedQuestions.length - 1) : 0;
+    activeQuestionIndexRef.current = restoredIndex;
     timeRemainingRef.current = remaining;
     questionTimeRemainingRef.current = exam.per_question_time_seconds;
     questionTimesRef.current = Object.fromEntries(parsedQuestions.map((question) => [question.id, exam.per_question_time_seconds ?? 0]));
     setCurrentExam(exam);
     setQuestions(parsedQuestions);
     setAnswers(restoredAnswers);
-    setActiveQuestionIndex(0);
+    setActiveQuestionIndex(restoredIndex);
     setTimeRemaining(remaining);
     setQuestionTimeRemaining(exam.per_question_time_seconds);
     setView('taking');
@@ -403,6 +511,8 @@ export function StudentExamsPage() {
     if (currentExam.no_reverse_back && nextIndex < activeQuestionIndexRef.current) return;
     activeQuestionIndexRef.current = nextIndex;
     setActiveQuestionIndex(nextIndex);
+    const submissionId = submissionIdRef.current;
+    if (submissionId) sessionStorage.setItem(`exam-question-index:${submissionId}`, String(nextIndex));
     if (currentExam.per_question_time_seconds) {
       const nextQuestionTime = questionTimesRef.current[questions[nextIndex].id] ?? currentExam.per_question_time_seconds;
       questionTimeRemainingRef.current = nextQuestionTime;
@@ -416,29 +526,46 @@ export function StudentExamsPage() {
     const question = questions[activeQuestionIndex];
     const canGoBack = activeQuestionIndex > 0 && !currentExam.no_reverse_back;
     const canGoForward = activeQuestionIndex < questions.length - 1;
+    const unanswered = questions.length - countAnswered(answers);
     return (
       <div className="max-w-4xl mx-auto space-y-6">
-        <div className="bg-white border-b border-gray-200 sticky top-0 z-10 p-4 rounded-lg shadow-sm">
-          <div className="flex items-center justify-between gap-4">
-            <div>
+        <div className="bg-white border-b border-gray-200 sticky top-0 z-10 p-3 sm:p-4 rounded-lg shadow-sm">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="min-w-0">
               <h3 className="text-gray-900 font-semibold">{currentExam.title}</h3>
               <p className="text-sm text-gray-600">Question {activeQuestionIndex + 1} of {questions.length}</p>
             </div>
-            <div className="flex gap-5 text-right">
+            <div className="flex flex-wrap items-center justify-between sm:justify-end gap-3 sm:gap-5 text-right">
               {questionTimeRemaining !== null && <div><p className="text-xs text-gray-600">This question</p><p className="text-lg font-mono font-bold text-indigo-600">{formatTime(questionTimeRemaining)}</p></div>}
-              <div><p className="text-xs text-gray-600">Time remaining</p><p className={`text-2xl font-mono font-bold ${timeRemaining < 300 ? 'text-red-600' : 'text-green-600'}`}>{formatTime(timeRemaining)}</p></div>
+              <div><p className="text-xs text-gray-600">Time remaining</p><p className="text-2xl font-mono font-bold text-gray-900">{formatTime(timeRemaining)}</p></div>
+              <button ref={submitButtonRef} onClick={() => setSubmitDialogOpen(true)} disabled={submitting} className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 flex items-center gap-2 text-sm font-medium disabled:opacity-50"><CheckCircle className="w-4 h-4" />{submitting ? 'Submitting…' : 'Submit exam'}</button>
             </div>
           </div>
         </div>
 
+        <p role="status" aria-live="polite" className="sr-only">{announcedTime}</p>
+        {timeRemaining < 300 && timeRemaining > 0 && <p className="flex items-center gap-2 text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-lg p-3"><TriangleAlert aria-hidden="true" className="w-4 h-4 shrink-0" />Less than five minutes remain.</p>}
+        {timeRemaining === 0 && <p className="text-sm font-medium text-red-800 bg-red-50 border border-red-200 rounded-lg p-3">Time is up - submitting</p>}
+        {tabNotice && <p role="status" className="text-sm text-amber-900 bg-amber-50 border border-amber-200 rounded-lg p-3">Leaving this tab is recorded.</p>}
+        {submitError && <div role="alert" className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-red-300 bg-red-50 p-3 text-sm text-red-900"><span>Could not submit. Retry</span><button onClick={() => void submitExam(currentExam)} disabled={submitting} className="rounded-md bg-red-700 px-3 py-1.5 font-medium text-white disabled:opacity-50">Retry</button></div>}
+
+        <div aria-label="Question palette" className="grid grid-cols-5 sm:grid-cols-8 md:grid-cols-10 gap-2">
+          {questions.map((item, index) => {
+            const answered = (answers[item.id] ?? '').trim().length > 0;
+            const current = index === activeQuestionIndex;
+            const locked = currentExam.no_reverse_back && index < activeQuestionIndex;
+            return <button key={item.id} onClick={() => goToQuestion(index)} disabled={submitting || locked} aria-current={current ? 'step' : undefined} aria-label={`Question ${index + 1}, ${current ? 'current' : answered ? 'answered' : 'unanswered'}${locked ? ', locked' : ''}`} className={`min-h-12 rounded-lg border p-2 flex flex-col items-center justify-center gap-1 text-sm disabled:cursor-not-allowed disabled:opacity-45 ${current ? 'border-indigo-700 bg-indigo-50 text-indigo-950 ring-2 ring-indigo-600' : answered ? 'border-green-700 bg-green-50 text-green-950' : 'border-gray-400 bg-white text-gray-900'}`}><span>{index + 1}</span>{current ? <Circle aria-hidden="true" className="h-3 w-3" /> : answered ? <Check aria-hidden="true" className="h-3 w-3" /> : <Circle aria-hidden="true" className="h-3 w-3" />}<span className="text-[10px]">{current ? 'Current' : answered ? 'Answered' : 'Unanswered'}</span></button>;
+          })}
+        </div>
+
         <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-          {question.section_title && <p className="text-xs font-semibold text-indigo-600 uppercase tracking-wide mb-3">{question.section_title}</p>}
+          {question.section_title && <p className="text-sm font-semibold text-indigo-700 mb-3">{question.section_title}</p>}
           <div className="flex items-start gap-3 mb-4">
             <span className="text-sm font-semibold text-gray-900 bg-gray-100 px-3 py-1 rounded shrink-0">Q{activeQuestionIndex + 1}</span>
-            <div className="flex-1"><p className="text-gray-900 mb-1">{question.question_text}</p>{question.question_image && <img src={question.question_image} alt="" className="mt-2 max-h-48 rounded-lg object-contain border border-gray-100" />}<p className="text-xs text-gray-500 mt-1">+{question.positive_marks ?? question.marks}{(question.negative_marks ?? 0) > 0 ? ` / −${question.negative_marks}` : ''}</p></div>
+            <div className="flex-1"><p className="text-gray-900 mb-1">{question.question_text}</p>{question.question_image && <img src={question.question_image} alt="Question image; activate to zoom" role="button" tabIndex={0} onClick={() => setZoomedImage(question.question_image ?? null)} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); setZoomedImage(question.question_image ?? null); } }} className="mt-2 max-h-48 rounded-lg object-contain border border-gray-100 cursor-zoom-in" />}<p className="text-xs text-gray-500 mt-1">+{question.positive_marks ?? question.marks}{(question.negative_marks ?? 0) > 0 ? ` / −${question.negative_marks}` : ''}</p></div>
           </div>
 
-          {question.question_type === 'mcq' && question.options && <div className="space-y-2">{question.options.map((option, optionIndex) => { const imageUrl = question.option_images?.[optionIndex]; return <label key={optionIndex} className={`flex items-center gap-3 p-3 border rounded-lg cursor-pointer transition-colors ${answers[question.id] === option ? 'border-indigo-500 bg-indigo-50' : 'border-gray-200 hover:bg-gray-50'}`}><input type="radio" name={`q-${question.id}`} value={option} checked={answers[question.id] === option} onChange={() => setAnswer(question.id, option)} className="w-4 h-4 text-indigo-600 shrink-0" />{imageUrl ? <img src={imageUrl} alt="" className="h-14 rounded object-contain" /> : <span className="text-sm text-gray-900">{option}</span>}</label>; })}</div>}
+          {question.question_type === 'mcq' && question.options && <div className="space-y-2">{question.options.map((option, optionIndex) => { const imageUrl = question.option_images?.[optionIndex]; return <label key={optionIndex} className={`flex items-center gap-3 p-3 border rounded-lg cursor-pointer transition-colors ${answers[question.id] === option ? 'border-indigo-500 bg-indigo-50' : 'border-gray-200 hover:bg-gray-50'}`}><input type="radio" name={`q-${question.id}`} value={option} checked={answers[question.id] === option} onChange={() => setAnswer(question.id, option)} className="w-4 h-4 text-indigo-600 shrink-0" />{imageUrl ? <img src={imageUrl} alt="Option image; activate to zoom" role="button" tabIndex={0} onClick={(event) => { event.preventDefault(); event.stopPropagation(); setZoomedImage(imageUrl); }} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); event.stopPropagation(); setZoomedImage(imageUrl); } }} className="h-14 rounded object-contain cursor-zoom-in" /> : <span className="text-sm text-gray-900">{option}</span>}</label>; })}</div>}
           {question.question_type === 'true_false' && <div className="space-y-2">{['True', 'False'].map((option) => <label key={option} className={`flex items-center gap-3 p-3 border rounded-lg cursor-pointer ${answers[question.id] === option ? 'border-indigo-500 bg-indigo-50' : 'border-gray-200'}`}><input type="radio" name={`q-${question.id}`} checked={answers[question.id] === option} onChange={() => setAnswer(question.id, option)} className="w-4 h-4 text-indigo-600" /><span className="text-sm">{option}</span></label>)}</div>}
           {question.question_type === 'numerical' && <input type="text" value={answers[question.id] ?? ''} onChange={(event) => setAnswer(question.id, event.target.value)} placeholder="Enter your answer" className="w-full px-4 py-3 border border-gray-300 rounded-lg text-sm" />}
           {question.question_type === 'theoretical' && <textarea value={answers[question.id] ?? ''} onChange={(event) => setAnswer(question.id, event.target.value)} placeholder="Write your answer…" rows={5} className="w-full px-4 py-3 border border-gray-300 rounded-lg text-sm" />}
@@ -446,9 +573,11 @@ export function StudentExamsPage() {
 
         <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4 flex items-center justify-between gap-3">
           <button onClick={() => goToQuestion(activeQuestionIndex - 1)} disabled={!canGoBack || submitting} className="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg disabled:opacity-40 flex items-center gap-2 text-sm"><ChevronLeft className="w-4 h-4" /> Back</button>
-          <p className="text-sm text-gray-600">Answered: {Object.keys(answers).length} / {questions.length}</p>
-          {canGoForward ? <button onClick={() => goToQuestion(activeQuestionIndex + 1)} disabled={submitting} className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 flex items-center gap-2 text-sm"><span>Next</span><ChevronRight className="w-4 h-4" /></button> : <button onClick={() => { if (confirm('Submit the exam? You cannot change answers after submission.')) void submitExam(currentExam); }} disabled={submitting} className="px-6 py-3 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 flex items-center gap-2 text-sm font-medium disabled:opacity-50"><CheckCircle className="w-5 h-5" /> {submitting ? 'Submitting…' : 'Submit Exam'}</button>}
+          <div className="text-center"><p className="text-sm text-gray-700">Answered: {countAnswered(answers)} / {questions.length}</p><p role="status" aria-live="polite" className="text-xs text-gray-600 mt-1">{saveStatus === 'saving' ? 'Saving…' : saveStatus === 'error' ? <button onClick={() => void persistAnswers(answersRef.current)} className="text-red-800 underline">Not saved, retry</button> : `Saved ${savedAt ?? '—'}`}</p></div>
+          {canGoForward ? <button onClick={() => goToQuestion(activeQuestionIndex + 1)} disabled={submitting} className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 flex items-center gap-2 text-sm"><span>Next</span><ChevronRight className="w-4 h-4" /></button> : <span className="text-sm text-gray-600">Last question</span>}
         </div>
+        {submitDialogOpen && <div className="fixed inset-0 z-50 grid place-items-center bg-black/50 p-4" role="presentation"><div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="submit-dialog-title" aria-describedby="submit-dialog-description" className="w-full max-w-md rounded-xl bg-white p-6 shadow-xl"><h2 id="submit-dialog-title" className="text-lg font-semibold text-gray-900">Submit exam?</h2><p id="submit-dialog-description" className="mt-2 text-sm text-gray-700">{unanswered} {unanswered === 1 ? 'question is' : 'questions are'} unanswered.</p><div className="mt-6 flex justify-end gap-3"><button onClick={() => { setSubmitDialogOpen(false); submitButtonRef.current?.focus(); }} className="rounded-lg border border-gray-300 px-4 py-2 text-sm text-gray-800">Keep working</button><button onClick={() => { setSubmitDialogOpen(false); submitButtonRef.current?.focus(); void submitExam(currentExam); }} className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white">Submit exam</button></div></div></div>}
+        {zoomedImage && <div className="fixed inset-0 z-[60] grid place-items-center bg-black/80 p-4" role="dialog" aria-modal="true" aria-label="Zoomed exam image" onClick={() => setZoomedImage(null)}><button onClick={() => setZoomedImage(null)} className="absolute right-4 top-4 rounded bg-white px-3 py-2 text-sm text-gray-900">Close image</button><img src={zoomedImage} alt="Zoomed exam content" className="max-h-[90vh] max-w-full object-contain" onClick={(event) => event.stopPropagation()} /></div>}
       </div>
     );
   }
