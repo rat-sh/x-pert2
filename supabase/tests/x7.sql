@@ -1,5 +1,5 @@
 begin;
-select plan(8);
+select plan(10);
 set local role postgres;
 
 insert into auth.users (id, aud, role, email, encrypted_password, raw_user_meta_data)
@@ -33,6 +33,27 @@ select throws_ok(
   '23514'::char(5), null::text, 'invalid question rolls back complete exam save'
 );
 select is((select title from public.exams where id = '00000000-0000-0000-0000-000000000711'), 'X7 saved'::text, 'failed save leaves previous exam unchanged');
+
+set local role postgres;
+insert into auth.users (id, aud, role, email, encrypted_password, raw_user_meta_data)
+values ('00000000-0000-0000-0000-000000000714', 'authenticated', 'authenticated', 'x7-student@example.test', '', '{"role":"student"}'::jsonb)
+on conflict (id) do nothing;
+insert into public.exam_submissions (id, exam_id, student_id, server_end_time, total_score)
+values ('00000000-0000-0000-0000-000000000715', '00000000-0000-0000-0000-000000000711', '00000000-0000-0000-0000-000000000714', now() + interval '30 minutes', 0)
+on conflict (id) do nothing;
+set local role authenticated;
+
+select throws_ok(
+  $$select public.save_exam_paper('{"id":"00000000-0000-0000-0000-000000000711","teacher_id":"00000000-0000-0000-0000-000000000701","batch_id":"00000000-0000-0000-0000-000000000710","batch_ids":["00000000-0000-0000-0000-000000000710"],"title":"must not save","duration_minutes":45}'::jsonb,'[{"id":"00000000-0000-0000-0000-000000000712","question_text":"Updated question","question_type":"mcq","options":["A","B"],"correct_answer":"A","positive_marks":4,"negative_marks":0,"order_index":0}]'::jsonb)$$,
+  'P0001'::char(5), 'Exam already attempted. Duplicate it to change questions.'::text,
+  'save RPC locks a paper after any submission exists'
+);
+select throws_ok(
+  $$delete from public.questions where id = '00000000-0000-0000-0000-000000000712'::uuid$$,
+  'P0001'::char(5), 'Exam already attempted. Duplicate it to change questions.'::text,
+  'question-bank deletion is blocked after a submission'
+);
+
 select lives_ok(
   $$select public.duplicate_exam('00000000-0000-0000-0000-000000000711')$$,
   'teacher can duplicate own exam using RPC'

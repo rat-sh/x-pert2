@@ -24,14 +24,7 @@ export function StudentResultsPage() {
     setLoading(true);
     const { data, error } = await supabase.from('student_result_view').select('*').order('submitted_at', { ascending: false });
     if (error) toast.error('Could not load your results.');
-    setSubmissions((data ?? []).map((row) => ({ ...row, batch_name: 'Batch' })) as ResultRow[]);
-    // Batch names come from the RLS-visible exam relation and do not need a privileged RPC.
-    const examIds = [...new Set((data ?? []).map((row) => row.exam_id))];
-    if (examIds.length) {
-      const { data: exams } = await supabase.from('exams').select('id, batches(name)').in('id', examIds);
-      const names = new Map((exams ?? []).map((exam) => [exam.id, (Array.isArray(exam.batches) ? exam.batches[0] : exam.batches)?.name ?? 'Batch']));
-      setSubmissions((data ?? []).map((row) => ({ ...row, batch_name: names.get(row.exam_id) ?? 'Batch' })) as ResultRow[]);
-    }
+    setSubmissions((data ?? []) as ResultRow[]);
     setLoading(false);
   }, [student]);
   useEffect(() => {

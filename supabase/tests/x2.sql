@@ -1,6 +1,6 @@
 begin;
 
-select plan(8);
+select plan(9);
 set local role postgres;
 
 insert into auth.users (id, aud, role, email, encrypted_password, raw_user_meta_data)
@@ -23,7 +23,9 @@ insert into public.exams (id, batch_id, teacher_id, title, duration_minutes, tot
 values ('00000000-0000-0000-0000-000000000130', '00000000-0000-0000-0000-000000000110', '00000000-0000-0000-0000-000000000101', 'X2 exam', 30, 1, 'SECRETKEY', '4321', true, 'active')
 on conflict (id) do nothing;
 insert into public.questions (id, exam_id, question_text, correct_answer, positive_marks)
-values ('00000000-0000-0000-0000-000000000140', '00000000-0000-0000-0000-000000000130', 'X2 question', 'correct', 1)
+values
+  ('00000000-0000-0000-0000-000000000140', '00000000-0000-0000-0000-000000000130', 'X2 question', 'correct', 1),
+  ('00000000-0000-0000-0000-000000000141', '00000000-0000-0000-0000-000000000130', 'X2 unanswered question', 'correct', 1)
 on conflict (id) do nothing;
 insert into public.exam_submissions (id, exam_id, student_id, server_end_time, total_score)
 values ('00000000-0000-0000-0000-000000000150', '00000000-0000-0000-0000-000000000130', '00000000-0000-0000-0000-000000000102', now() + interval '30 minutes', 1)
@@ -63,8 +65,14 @@ set local role postgres;
 update public.exam_submissions set submitted_at = now()
 where id = '00000000-0000-0000-0000-000000000150'::uuid;
 set local role authenticated;
-select is((select count(*)::integer from public.student_answer_review_view where submission_id = '00000000-0000-0000-0000-000000000150'::uuid), 1,
+select is((select count(*)::integer from public.student_answer_review_view where submission_id = '00000000-0000-0000-0000-000000000150'::uuid), 2,
   'review reveals answer only after submission');
+select ok(exists (
+  select 1 from public.student_answer_review_view
+  where submission_id = '00000000-0000-0000-0000-000000000150'::uuid
+    and question_id = '00000000-0000-0000-0000-000000000141'::uuid
+    and student_answer is null and marks_awarded = 0
+), 'answer review includes unanswered questions with zero marks');
 select is((select count(*)::integer from public.student_result_view where submission_id = '00000000-0000-0000-0000-000000000150'::uuid), 1,
   'student sees own submitted result');
 
