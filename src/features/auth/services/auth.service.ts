@@ -14,11 +14,15 @@ export async function signIn(email: string, password: string) {
 }
 
 export async function signUp(input: SignupInput) {
+  const origin = typeof window !== 'undefined' && window.location.origin
+    ? window.location.origin
+    : (process.env.NEXT_PUBLIC_APP_URL ?? '');
+
   const { data: authData, error: authError } = await supabase.auth.signUp({
     email: input.email,
     password: input.password,
     options: {
-      emailRedirectTo: `${typeof window !== 'undefined' ? window.location.origin : ''}/login`,
+      emailRedirectTo: `${origin}/login`,
       data: {
         full_name: input.full_name,
         role: 'teacher',
@@ -50,7 +54,9 @@ export async function signOut() {
  * Redirects to /login?reset=true after the user clicks the link.
  */
 export async function resetPassword(email: string) {
-  const origin = typeof window !== 'undefined' ? window.location.origin : '';
+  const origin = typeof window !== 'undefined' && window.location.origin
+    ? window.location.origin
+    : (process.env.NEXT_PUBLIC_APP_URL ?? '');
   const { data, error } = await supabase.auth.resetPasswordForEmail(email, {
     redirectTo: `${origin}/login?reset=true`,
   });
