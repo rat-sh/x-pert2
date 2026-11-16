@@ -10,7 +10,9 @@ export async function signUpStudent(params: {
   email: string;
   password: string;
 }) {
-  const origin = typeof window !== 'undefined' ? window.location.origin : '';
+  const origin = typeof window !== 'undefined' && window.location.origin
+    ? window.location.origin
+    : (process.env.NEXT_PUBLIC_APP_URL ?? '');
 
   const { data, error } = await supabase.auth.signUp({
     email: params.email.trim(),
