@@ -14,9 +14,9 @@ export async function signIn(email: string, password: string) {
 }
 
 export async function signUp(input: SignupInput) {
-  const origin = typeof window !== 'undefined' && window.location.origin
-    ? window.location.origin
-    : (process.env.NEXT_PUBLIC_APP_URL ?? '');
+  const origin = (process.env.NEXT_PUBLIC_APP_URL && process.env.NEXT_PUBLIC_APP_URL.trim() !== '')
+    ? process.env.NEXT_PUBLIC_APP_URL.replace(/\/$/, '')
+    : (typeof window !== 'undefined' ? window.location.origin : '');
 
   const { data: authData, error: authError } = await supabase.auth.signUp({
     email: input.email,
@@ -33,6 +33,14 @@ export async function signUp(input: SignupInput) {
 
   if (authError || !authData.user) {
     return { data: null, error: authError };
+  }
+
+  // If Supabase returns empty identities, this email is already registered
+  if (authData.user.identities && authData.user.identities.length === 0) {
+    return {
+      data: null,
+      error: new Error('An account with this email already exists. Please sign in.'),
+    };
   }
 
   // If we have an immediate session (email confirmation disabled), update teacher profile
@@ -54,9 +62,9 @@ export async function signOut() {
  * Redirects to /login?reset=true after the user clicks the link.
  */
 export async function resetPassword(email: string) {
-  const origin = typeof window !== 'undefined' && window.location.origin
-    ? window.location.origin
-    : (process.env.NEXT_PUBLIC_APP_URL ?? '');
+  const origin = (process.env.NEXT_PUBLIC_APP_URL && process.env.NEXT_PUBLIC_APP_URL.trim() !== '')
+    ? process.env.NEXT_PUBLIC_APP_URL.replace(/\/$/, '')
+    : (typeof window !== 'undefined' ? window.location.origin : '');
   const { data, error } = await supabase.auth.resetPasswordForEmail(email, {
     redirectTo: `${origin}/login?reset=true`,
   });

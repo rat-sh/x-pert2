@@ -68,7 +68,12 @@ export function LoginForm() {
     }
 
     const { data: profile } = await fetchProfile(data.user.id);
-    router.push(profile?.role === 'teacher' ? '/teacher' : '/student');
+    if (profile?.role === 'teacher') {
+      router.push('/teacher');
+    } else {
+      toast.error('This account is registered as a Student, not a Teacher.');
+      router.push('/student');
+    }
   };
 
   return (

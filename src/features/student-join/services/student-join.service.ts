@@ -10,9 +10,9 @@ export async function signUpStudent(params: {
   email: string;
   password: string;
 }) {
-  const origin = typeof window !== 'undefined' && window.location.origin
-    ? window.location.origin
-    : (process.env.NEXT_PUBLIC_APP_URL ?? '');
+  const origin = (process.env.NEXT_PUBLIC_APP_URL && process.env.NEXT_PUBLIC_APP_URL.trim() !== '')
+    ? process.env.NEXT_PUBLIC_APP_URL.replace(/\/$/, '')
+    : (typeof window !== 'undefined' ? window.location.origin : '');
 
   const { data, error } = await supabase.auth.signUp({
     email: params.email.trim(),
@@ -26,5 +26,17 @@ export async function signUpStudent(params: {
     },
   });
 
-  return { data, error };
+  if (error) {
+    return { data: null, error };
+  }
+
+  // If Supabase returns empty identities, this email is already registered
+  if (data?.user?.identities && data.user.identities.length === 0) {
+    return {
+      data: null,
+      error: new Error('An account with this email already exists. Please sign in.'),
+    };
+  }
+
+  return { data, error: null };
 }
